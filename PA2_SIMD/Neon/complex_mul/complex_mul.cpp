@@ -26,7 +26,7 @@ public:
 //g++ -march=armv8-a test.cpp -o test -g -std=c++11
 Complex A[MAXN],B[MAXN],C[MAXN];
 float neg[4]={-1,1,-1,1};
-void V_complex_mul(Complex* x, Complex* y,Complex* c,float* neg)//利用neon指令集同时进行四个复数乘法,结果存储在C中
+void V_complex_mul(Complex* x, Complex* y,Complex* c,float* neg)//利用neon指令集同时进行两个复数乘法,结果存储在C中
 {
     float32x4_t a = vld1q_f32((float*)x);
     float32x4_t b = vld1q_f32((float*)y);
