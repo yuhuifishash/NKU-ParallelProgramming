@@ -9,7 +9,7 @@
 using namespace std;
 const int MAXN=20000005;
 const float PI=acos(-1.0);
-const int thread_count = 4;
+const int thread_count = 8;
 pthread_barrier_t barr_merge;
 pthread_barrier_t barr_root;
 sem_t sem_expand;
@@ -76,6 +76,8 @@ void* FFT(void* rank)
     for(int mid=1;mid<limit;mid<<=1){
         Complex Wn{cos(PI/mid),type*sin(PI/mid)};
         if(mid >= 8){
+            int blocks = max(1,limit/(mid<<1)/thread_count);
+            int begin = min(limit,id*blocks*(mid<<1)),end = min(limit,(id+1)*blocks*(mid<<1));
             if(id == 0){
                 Complex Wn_4 = Wn*Wn*Wn*Wn;
                 Complex Mul_epi[4]={Wn_4,Wn_4,Wn_4,Wn_4};
@@ -87,7 +89,7 @@ void* FFT(void* rank)
                 }
             }
             pthread_barrier_wait(&barr_root);
-            for(int R=mid<<1,j=id*(mid<<1);j<limit;j+=thread_count*R){
+            for(int R=mid<<1,j=begin;j<end;j+=R){
                 for(int k=0;k<mid;k+=4){
                     __m256 t1 = _mm256_loadu_ps((float*)(A+j+k));
                     __m256 t2 = _mm256_complex_mul(A+j+k+mid,W+k);
@@ -99,15 +101,17 @@ void* FFT(void* rank)
             }
         }
         else if(mid < limit>>2){
-            for(int R=mid<<1,j=0;j<limit;j+=4*thread_count*R){
+            int blocks = max(1,limit/4/(mid<<1)/thread_count);
+            int begin = min(limit,id*blocks*(mid<<1)*4),end = min(limit,(id+1)*blocks*(mid<<1)*4);
+            for(int R=mid<<1,j=begin;j<end;j+=4*R){
                 Complex w{1,0};
                 Complex A_t[4],B_t[4];
                 __m256 t1,t2,t3;
                 for(int k=0;k<mid;++k,w=w*Wn){
-                    A_t[0] = A[j+k+4*id*R];A_t[1] = A[j+k+R+4*id*R];
-                    A_t[2] = A[j+k+2*R+4*id*R];A_t[3] = A[j+k+3*R+4*id*R];
-                    B_t[0] = A[j+k+mid+4*id*R];B_t[1] = A[j+k+R+mid+4*id*R];
-                    B_t[2] = A[j+k+2*R+mid+4*id*R];B_t[3] = A[j+k+3*R+mid+4*id*R];
+                    A_t[0] = A[j+k];A_t[1] = A[j+k+R];
+                    A_t[2] = A[j+k+2*R];A_t[3] = A[j+k+3*R];
+                    B_t[0] = A[j+k+mid];B_t[1] = A[j+k+R+mid];
+                    B_t[2] = A[j+k+2*R+mid];B_t[3] = A[j+k+3*R+mid];
                     Complex W_t[4]={w,w,w,w};
                     t1 = _mm256_loadu_ps((float*)A_t);
                     t2 = _mm256_complex_mul(W_t,B_t);
@@ -115,15 +119,17 @@ void* FFT(void* rank)
                     t2 = _mm256_sub_ps(t1,t2);
                     _mm256_storeu_ps((float*)A_t,t3);
                     _mm256_storeu_ps((float*)B_t,t2);
-                    A[j+k+4*id*R] = A_t[0];A[j+k+R+4*id*R] = A_t[1];
-                    A[j+k+2*R+4*id*R] = A_t[2];A[j+k+3*R+4*id*R] = A_t[3];
-                    A[j+k+mid+4*id*R] = B_t[0];A[j+k+R+mid+4*id*R] = B_t[1];
-                    A[j+k+2*R+mid+4*id*R] = B_t[2];A[j+k+3*R+mid+4*id*R] = B_t[3];
+                    A[j+k] = A_t[0];A[j+k+R] = A_t[1];
+                    A[j+k+2*R] = A_t[2];A[j+k+3*R] = A_t[3];
+                    A[j+k+mid] = B_t[0];A[j+k+R+mid] = B_t[1];
+                    A[j+k+2*R+mid] = B_t[2];A[j+k+3*R+mid] = B_t[3];
                 }
             }
         }
         else{
-            for(int R=mid<<1,j=id*(mid<<1);j<limit;j+=thread_count*R){
+            int blocks = max(1,limit/(mid<<1)/thread_count);
+            int begin = min(limit,id*blocks*(mid<<1)),end = min(limit,(id+1)*blocks*(mid<<1));
+            for(int R=mid<<1,j=begin;j<end;j+=R){
                 Complex w{1,0};
                 for(int k=0;k<mid;++k,w=w*Wn){
                     Complex x=A[j+k],y=w*A[j+mid+k];
@@ -137,10 +143,12 @@ void* FFT(void* rank)
     if(type == 1){return NULL;}
 
     __m256 t2 = _mm256_set1_ps(limit);
-    for(int i=0;i<limit;i+=4*thread_count){
-        __m256 t1 = _mm256_loadu_ps((float*)(A+i+4*id));
+    int blocks = max(1,limit/4/thread_count);
+    int begin = min(limit,id*4*blocks) , end = min(limit,(id+1)*4*blocks);
+    for(int i=begin;i<end;i+=4){
+        __m256 t1 = _mm256_loadu_ps((float*)(A+i));
         t1 = _mm256_div_ps(t1,t2);
-        _mm256_storeu_ps((float*)(A+i+4*id),t1);
+        _mm256_storeu_ps((float*)(A+i),t1);
     }
     return NULL;
 }
@@ -209,7 +217,7 @@ int main()
     Conv(a,b,c);
     for(int i=0;i<N+M-1;++i){
         //printf("%d ",(int)(c[i].Re+0.5));
-    }//cout<<"\n";
+    }//printf("\n");
 
     sem_destroy(&sem_expand);
     pthread_barrier_destroy(&barr_merge);

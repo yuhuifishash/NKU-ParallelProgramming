@@ -38,15 +38,15 @@ int n=0,m=0,l=0,r[MAXN]={},limit=1;
 void init()
 {
     scanf("%d%d",&n,&m);
-    for(int i=0;i<=n;++i){
+    for(int i=0;i<n;++i){
         a[i].Re=rand()%10+1;
         //scanf("%lf",&a[i].Re);
     }
-    for(int i=0;i<=m;++i){
+    for(int i=0;i<m;++i){
         b[i].Re=rand()%10+1;
         //scanf("%lf",&b[i].Re);
     }
-    while(limit<=n+m){
+    while(limit<=n+m-2){
         limit<<=1;
         ++l;
     }
@@ -55,7 +55,6 @@ void init()
     }
 }
 pthread_barrier_t barr_merge;
-pthread_barrier_t barr_fft;
 sem_t sem_expand;
 void* fft_dft(void* rank)
 {
@@ -91,11 +90,10 @@ void* fft_dft(void* rank)
         pthread_barrier_wait(&barr_merge);
     }
     if(type == -1){
-        for(int i=id;i<=n+m;i+=thread_count){
+        for(int i=id;i<=limit;i+=thread_count){
             A[i].Re=(int)(A[i].Re/limit+0.5);
         }
     }
-    pthread_barrier_wait(&barr_fft);
     return NULL;
 }
 int main()
@@ -106,7 +104,6 @@ int main()
 
     sem_init(&sem_expand,0,0);
     pthread_barrier_init(&barr_merge,NULL,thread_count);
-    pthread_barrier_init(&barr_fft,NULL,thread_count+1);
 
     pthread_t* thread_handles = new pthread_t[thread_count];
     thread_id* id = new thread_id[thread_count];
@@ -114,40 +111,39 @@ int main()
         id[i].arr=a ; id[i].id=i ; id[i].type=1;
         pthread_create(&thread_handles[i],NULL,fft_dft,(void*)(id+i));
     }
-    pthread_barrier_wait(&barr_fft);
     for(int i = 0 ; i < thread_count ; ++i){
         pthread_join(thread_handles[i],NULL);
     }
+
     for(int i = 0 ; i < thread_count ; ++i){
         id[i].arr=b ; id[i].id=i ; id[i].type=1;
         pthread_create(&thread_handles[i],NULL,fft_dft,(void*)(id+i));
     }
-    pthread_barrier_wait(&barr_fft);
     for(int i = 0 ; i < thread_count ; ++i){
         pthread_join(thread_handles[i],NULL);
     }
+
     for(int i=0;i<=limit;++i){
         c[i]=a[i]*b[i];
     }
+
     for(int i = 0 ; i < thread_count ; ++i){
         id[i].arr=c ; id[i].id=i ; id[i].type=-1;
         pthread_create(&thread_handles[i],NULL,fft_dft,(void*)(id+i));
     }
-    pthread_barrier_wait(&barr_fft);
     for(int i = 0 ; i < thread_count ; ++i){
         pthread_join(thread_handles[i],NULL);
     }
 
     sem_destroy(&sem_expand);
     pthread_barrier_destroy(&barr_merge);
-    pthread_barrier_destroy(&barr_fft);
     delete []thread_handles;
     delete []id;
 
     auto finish = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<float> elapsed = finish - start;
     printf("%f\n",elapsed.count());
-    for(int i=0;i<=n+m;++i){
+    for(int i=0;i<n+m-1;++i){
         //printf("%d ",(int)c[i].Re);
     }
     return 0;

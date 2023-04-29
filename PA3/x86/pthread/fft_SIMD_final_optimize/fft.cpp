@@ -9,7 +9,7 @@
 using namespace std;
 const int MAXN=20000005;
 const float PI=acos(-1.0);
-const int thread_count = 4;
+const int thread_count = 8;
 pthread_barrier_t barr_merge;
 pthread_barrier_t barr_root;
 sem_t sem_expand;
