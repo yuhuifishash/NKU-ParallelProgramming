@@ -37,15 +37,15 @@ int n=0,m=0,l=0,r[MAXN]={},limit=1;
 void init()
 {
     scanf("%d%d",&n,&m);
-    for(int i=0;i<=n;++i){
+    for(int i=0;i<n;++i){
         a[i].Re=rand()%10+1;
         //scanf("%lf",&a[i].Re);
     }
-    for(int i=0;i<=m;++i){
+    for(int i=0;i<m;++i){
         b[i].Re=rand()%10+1;
         //scanf("%lf",&b[i].Re);
     }
-    while(limit<=n+m){
+    while(limit<=n+m-2){
         limit<<=1;
         ++l;
     }
@@ -83,7 +83,7 @@ void FFT(Complex* A,int type)
 
     if(type == -1){
         #pragma omp for
-        for(int i=0;i<=n+m;++i){
+        for(int i=0;i<=limit;++i){
             A[i].Re=(int)(A[i].Re/limit+0.5);
         }
     }
@@ -108,7 +108,7 @@ int main()
     auto finish = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<float> elapsed = finish - start;
     printf("%f\n",elapsed.count());
-    for(int i=0;i<=n+m;++i){
+    for(int i=0;i<=n+m-2;++i){
         //printf("%d ",(int)c[i].Re);
     }
     return 0;
