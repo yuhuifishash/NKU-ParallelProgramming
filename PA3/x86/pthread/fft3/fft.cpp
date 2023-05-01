@@ -101,8 +101,8 @@ void* fft_dft(void* rank)
             }
             pthread_barrier_wait(&barr_fft);
 
-            for(int j=id*(mid<<1);j<limit;j+=thread_count*(mid<<1)){
-                for(int k=0;k<mid;k++){
+            for(int j=0;j<limit;j+=(mid<<1)){
+                for(int k=id;k<mid;k+=thread_count){
                     Complex x=A[j+k],y=W[k]*A[j+mid+k];
                     A[j+k]=x+y;
                     A[j+mid+k]=x-y;
