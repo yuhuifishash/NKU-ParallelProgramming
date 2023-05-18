@@ -1,4 +1,4 @@
-//g++ -march=armv8-a fft_blocks/cmp/fft.cpp -o test -g -std=c++11 -fopenmp
+//g++ -march=armv8-a fft_blocks/cmp1/fft.cpp -o test -g -std=c++11 -fopenmp
 #include<stdio.h>
 #include<stdlib.h>
 #include<cmath>
@@ -52,8 +52,9 @@ int n=0,m=0,l=0,r[MAXN]={},limit=1;
 float neg[4]={-1,1,-1,1};
 void init()
 {
-    n=30,m=3;
+    //n=50,m=7;
     //n=8388608,m=7;
+    limit = 1,l = 0;
     for(int i=0;i<n;++i){
         a[i].Re=rand()%10+1;
     }
@@ -62,7 +63,7 @@ void init()
     }
 }
 void FFT(Complex* A,int type)
-{ 
+{
     for(int i=0;i<limit;++i){
         if(i<r[i]){
             swap(A[i],A[r[i]]);
@@ -71,82 +72,18 @@ void FFT(Complex* A,int type)
     for(int s=0;(1<<s)<limit;++s){
         int mid = 1<<s;//log2(mid)
         int R=mid<<1;
-        if(mid >= 4){
-            // Complex Wn_2 = Wn*Wn;
-            // Complex Mul_epi[2]={Wn_2,Wn_2};
-            // W[0] = Complex{1,0};
-            // W[1] = Complex{1,0}*Wn;
-            // for(int k=2;k<mid;k+=2){
-            //     V_complex_mul(W+k-2,Mul_epi,W+k,neg);
-            // }
-            for(int j=0;j<limit;j+=R){
-                for(int k=0;k<mid;k+=2){
-                    V_complex_mul(A+j+k+mid,W[type == 1 ? 0:1][s]+k,A+j+k+mid,neg);
-                    float* A1 = (float*)(A+j+k);
-                    float* A2 = (float*)(A+j+k+mid);
-                    asm volatile(
-                        "ldr q0,[%0]\n"
-                        "ldr q1,[%1]\n"
-                        "fadd v2.4s,v1.4s,v0.4s\n"
-                        "fsub v0.4s,v0.4s,v1.4s\n"
-                        "str q2,[%0]\n"
-                        "str q0,[%1]\n"
-                        :"+r"(A1),"+r"(A2)
-                        :
-                        :"v0","v1","v2","q0","q1","q2","memory","cc"
-                    );
-                }   
-            }
-        }
-        else if(mid < limit>>1){
-            for(int j=0;j<limit;j+=2*R){
-                Complex A_t[2],B_t[2];
-                for(int k=0;k<mid;++k){
-                    A_t[0] = A[j+k];A_t[1] = A[j+k+R];
-                    B_t[0] = W[type == 1 ? 0:1][s][k]*A[j+k+mid];
-                    B_t[1] = W[type == 1 ? 0:1][s][k]*A[j+k+R+mid];
-                    float* A_tt = (float*)A_t;
-                    float* B_tt = (float*)B_t;
-                    asm volatile(
-                        "ldr q0,[%0]\n"
-                        "ldr q1,[%1]\n"
-                        "fadd v2.4s,v1.4s,v0.4s\n"
-                        "fsub v0.4s,v0.4s,v1.4s\n"
-                        "str q2,[%0]\n"
-                        "str q0,[%1]\n"
-                        :"+r"(A_tt),"+r"(B_tt)
-                        :
-                        :"v0","v1","v2","q0","q1","q2","memory","cc"
-                    );
-                    A[j+k] = A_t[0];A[j+k+R] = A_t[1];
-                    A[j+k+mid] = B_t[0];A[j+k+R+mid] = B_t[1];
-                }
-            }
-        }
-        else{
-            for(int j=0;j<limit;j+=R){
-                for(int k=0;k<mid;++k){
-                    Complex x=A[j+k],y=W[type == 1 ? 0:1][s][k]*A[j+mid+k];
-                    A[j+k]=x+y;
-                    A[j+mid+k]=x-y;
-                }
+        for(int j=0;j<limit;j+=R){
+            for(int k=0;k<mid;++k){
+                Complex x=A[j+k],y=W[type == 1 ? 0:1][s][k]*A[j+mid+k];
+                A[j+k]=x+y;
+                A[j+mid+k]=x-y;
             }
         }
     }
     if(type == 1){return;}
-    float LIM[4]={(float)limit,(float)limit,(float)limit,(float)limit};
-    float* LIMt = (float*)LIM;
-    for(int i=0;i<=limit;i+=2){
-        float* A_t = (float*)(A+i);
-        asm volatile(
-            "ldr q0,[%0]\n"
-            "ldr q1,[%1]\n"
-            "fdiv v0.4s,v0.4s,v1.4s\n"
-            "str q0,[%0]\n"
-            :"+r"(A_t),"+r"(LIMt)
-            :
-            :"v0","v1","q0","q1","memory","cc"
-        );
+    for(int i=0;i<=limit;++i){
+        A[i].Re/=limit;
+        A[i].Im/=limit;
     }
 }
 int blocks = 24;
@@ -191,7 +128,7 @@ void Conv(Complex* A,Complex* B,Complex* C)
 
     FFT(B,1);
 
-    for(int i=0;i<=n;i+=blocks){
+    for(int i=0;i<n;i+=blocks){
         Complex* ta = new Complex[limit+5];
         Complex* tc = new Complex[limit+5];
 
@@ -209,9 +146,11 @@ void Conv(Complex* A,Complex* B,Complex* C)
 }
 int main()
 {
-    Conv(a,b,ans);
-    for(int i=0;i<n-m+1;++i){
-        printf("%d ",(int)(ans[i].Re+0.5));
+    int t[8]={3,5,7,9,11,31,101};
+    for(int i=0;i<7;++i){
+        n = 8388608,m = t[i];
+        blocks = 253 - m;
+        Conv(a,b,ans);
     }
     return 0;
 }
