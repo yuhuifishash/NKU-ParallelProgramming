@@ -1,4 +1,4 @@
-//g++ cmp/FFT2D_SIMD_openmp.cpp -o test -g -std=c++11 -fopenmp
+//mpic++ cmp/FFT2D_SIMD_openmp.cpp -o test -g -std=c++11 -fopenmp
 #include<iostream>
 #include<cmath>
 #include<chrono>
@@ -27,11 +27,31 @@ public:
     }
 };
 Complex a[MAXN][MAXN]={},b[MAXN][MAXN]={},c[MAXN][MAXN]={};
-Complex rev_col[MAXN]={};
+Complex rev_col[MAXN][MAXN]={};
 int n=0,m=0,s=0,t=0;
 int l=0,r[MAXN]={};
 int limit=1;
-Complex W[MAXN]={};float neg[4]={-1,1,-1,1};
+Complex W[2][20][MAXN]={};float neg[4]={-1,1,-1,1};
+void init_root(int limit)
+{
+    for(int s=0;(1<<s)<limit;++s){
+        int mid = (1<<s);
+        Complex Wn{cos(PI/mid),sin(PI/mid)};
+        Complex w{1,0};
+        for(int k=0;k<mid;++k,w=w*Wn){
+            W[0][s][k] = w;
+        }
+    }
+
+    for(int s=0;(1<<s)<limit;++s){
+        int mid = (1<<s);
+        Complex Wn{cos(PI/mid),-sin(PI/mid)};
+        Complex w{1,0};
+        for(int k=0;k<mid;++k,w=w*Wn){
+            W[1][s][k] = w;
+        }
+    }
+}
 void V_complex_mul(Complex* x, Complex* y,Complex* c,float* neg)//利用neon指令集同时进行四个复数乘法,结果存储在C中
 {
     asm volatile(
@@ -51,81 +71,41 @@ void V_complex_mul(Complex* x, Complex* y,Complex* c,float* neg)//利用neon指�
     );
 }
 void FFT(Complex* A,int type)
-{
-    #pragma omp single
-    {   
+{ 
     for(int i=0;i<limit;++i){
         if(i<r[i]){
             swap(A[i],A[r[i]]);
         }
     }
-    }
-    #pragma omp barrier
-    for(int mid=1;mid<limit;mid<<=1){
-        Complex Wn{cos(PI/mid),type*sin(PI/mid)};
-        int R=mid<<1;
+    for(int s=0;(1<<s)<limit;++s){
+        int mid = 1<<s;
         if(mid >= 4){
-            #pragma omp single
-            {
-            Complex Wn_2 = Wn*Wn;
-            Complex Mul_epi[2]={Wn_2,Wn_2};
-            W[0] = Complex{1,0};
-            W[1] = Complex{1,0}*Wn;
-            for(int k=2;k<mid;k+=2){
-                V_complex_mul(W+k-2,Mul_epi,W+k,neg);
-            }
-            }
-            if(limit/(mid<<1) < thread_count ){
-                #pragma omp for collapse(2)
-                for(int j=0;j<limit;j+=R){
-                    for(int k=0;k<mid;k+=2){
-                        V_complex_mul(A+j+k+mid,W+k,A+j+k+mid,neg);
-                        float* A1 = (float*)(A+j+k);
-                        float* A2 = (float*)(A+j+k+mid);
-                        asm volatile(
-                            "ldr q0,[%0]\n"
-                            "ldr q1,[%1]\n"
-                            "fadd v2.4s,v1.4s,v0.4s\n"
-                            "fsub v0.4s,v0.4s,v1.4s\n"
-                            "str q2,[%0]\n"
-                            "str q0,[%1]\n"
-                            :"+r"(A1),"+r"(A2)
-                            :
-                            :"v0","v1","v2","q0","q1","q2","memory","cc"
-                        );
-                    }   
-                }
-            }
-            else{
-                #pragma omp for
-                for(int j=0;j<limit;j+=R){
-                    for(int k=0;k<mid;k+=2){
-                        V_complex_mul(A+j+k+mid,W+k,A+j+k+mid,neg);
-                        float* A1 = (float*)(A+j+k);
-                        float* A2 = (float*)(A+j+k+mid);
-                        asm volatile(
-                            "ldr q0,[%0]\n"
-                            "ldr q1,[%1]\n"
-                            "fadd v2.4s,v1.4s,v0.4s\n"
-                            "fsub v0.4s,v0.4s,v1.4s\n"
-                            "str q2,[%0]\n"
-                            "str q0,[%1]\n"
-                            :"+r"(A1),"+r"(A2)
-                            :
-                            :"v0","v1","v2","q0","q1","q2","memory","cc"
-                        );
-                    }   
-                }
+            for(int R=mid<<1,j=0;j<limit;j+=R){
+                for(int k=0;k<mid;k+=2){
+                    V_complex_mul(A+j+k+mid,W[type == 1 ? 0:1][s]+k,A+j+k+mid,neg);
+                    float* A1 = (float*)(A+j+k);
+                    float* A2 = (float*)(A+j+k+mid);
+                    asm volatile(
+                        "ldr q0,[%0]\n"
+                        "ldr q1,[%1]\n"
+                        "fadd v2.4s,v1.4s,v0.4s\n"
+                        "fsub v0.4s,v0.4s,v1.4s\n"
+                        "str q2,[%0]\n"
+                        "str q0,[%1]\n"
+                        :"+r"(A1),"+r"(A2)
+                        :
+                        :"v0","v1","v2","q0","q1","q2","memory","cc"
+                    );
+                }   
             }
         }
         else if(mid < limit>>1){
-            #pragma omp for
-            for(int j=0;j<limit;j+=2*R){
-                Complex w{1,0};
+            for(int R=mid<<1,j=0;j<limit;j+=2*R){
                 Complex A_t[2],B_t[2];
-                for(int k=0;k<mid;++k,w=w*Wn){
+                for(int k=0;k<mid;++k){
                     A_t[0] = A[j+k];A_t[1] = A[j+k+R];
-                    B_t[0] = w*A[j+k+mid];B_t[1] = w*A[j+k+R+mid];
+                    B_t[0] = W[type == 1 ? 0:1][s][k]*A[j+k+mid];
+                    B_t[1] = W[type == 1 ? 0:1][s][k]*A[j+k+R+mid];
                     float* A_tt = (float*)A_t;
                     float* B_tt = (float*)B_t;
                     asm volatile(
@@ -145,11 +125,9 @@ void FFT(Complex* A,int type)
             }
         }
         else{
-            #pragma omp for
-            for(int j=0;j<limit;j+=R){
-                Complex w{1,0};
-                for(int k=0;k<mid;++k,w=w*Wn){
-                    Complex x=A[j+k],y=w*A[j+mid+k];
+            for(int R=mid<<1,j=0;j<limit;j+=R){
+                for(int k=0;k<mid;++k){
+                    Complex x=A[j+k],y=W[type == 1 ? 0:1][s][k]*A[j+mid+k];
                     A[j+k]=x+y;
                     A[j+mid+k]=x-y;
                 }
@@ -159,8 +137,7 @@ void FFT(Complex* A,int type)
     if(type == 1){return;}
     float LIM[4]={(float)limit,(float)limit,(float)limit,(float)limit};
     float* LIMt = (float*)LIM;
-    #pragma omp for
-    for(int i=0;i<=limit;i+=2){
+    for(int i=0;i<limit;i+=2){
         float* A_t = (float*)(A+i);
         asm volatile(
             "ldr q0,[%0]\n"
@@ -172,11 +149,10 @@ void FFT(Complex* A,int type)
             :"v0","v1","q0","q1","memory","cc"
         );
     }
-    
 }
 void init()
 {
-    n = 2000,m = 2000,s = 2000,t = 2000;
+    //n = 2000,m = 2000,s = 2000,t = 2000;
     //n = 10,m = 10,s = 10,t = 10;
     for(int i=0;i<n;++i){
         for(int j=0;j<m;++j){
@@ -196,19 +172,24 @@ void FFT_2D(Complex A[][MAXN],int n,int m,int type)
 {
     #pragma omp parallel num_threads(thread_count)
     {
+        #pragma omp for
         for(int i=0;i<n;++i){
             FFT(A[i],type);
         }
-    //for(int i=0;i<n;++i){for(int j=0;j<m;++j){cout<<fixed<<setprecision(2)<<A[i][j].Re<<" "<<A[i][j].Im<<"j ";}cout<<"\n";}cout<<"\n";
-        for(int j=0;j<m;++j){
-            #pragma omp for
-            for(int i=0;i<n;++i){
-                rev_col[i] = A[i][j];
+        #pragma omp for
+        for(int i=0;i<n;++i){
+            for(int j=0;j<m;++j){  
+                rev_col[i][j] = A[j][i];
             }
-            FFT(rev_col,type);
-            #pragma omp for
-            for(int i=0;i<n;++i){
-                A[i][j] = rev_col[i];
+        }
+        #pragma omp for
+        for(int i=0;i<m;++i){
+            FFT(rev_col[i],type);
+        }
+        #pragma omp for
+        for(int i=0;i<n;++i){
+            for(int j=0;j<m;++j){  
+                A[i][j] = rev_col[j][i];
             }
         }
     }
@@ -221,7 +202,7 @@ void CONV_2D()
     for(int i=0;i<limit;++i){
         r[i]=(r[i>>1]>>1)|((i&1)<<(l-1));
     }
-    auto start = std::chrono::high_resolution_clock::now();
+    init_root(limit);
     FFT_2D(a,limit,limit,1);
     //for(int i=0;i<n;++i){for(int j=0;j<m;++j){cout<<fixed<<setprecision(2)<<a[i][j].Re<<" "<<a[i][j].Im<<"j ";}cout<<"\n";}cout<<"\n";
     FFT_2D(b,limit,limit,1);
@@ -231,16 +212,20 @@ void CONV_2D()
         }
     }
     FFT_2D(c,limit,limit,-1);
-    auto finish = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<float> elapsed = finish - start;
-    printf("%f\n",elapsed.count());
 }
 int main()
 {
-    ios::sync_with_stdio(false);
-    cin.tie(0);
-    init();
-    CONV_2D();   
+    double T[20]={0.56,1.1,3.5,13,49,0.27,1.38,5.72};
+    int thr[20]={14,30,62,126,254,510,1022,2046};
+    for(int i=0;i<8;++i){
+        n = m = s = t = thr[i];
+        init();
+        auto start = std::chrono::high_resolution_clock::now();
+        CONV_2D();
+        auto finish = std::chrono::high_resolution_clock::now();
+	    std::chrono::duration<float> elapsed = finish - start;
+        printf("%f/%f\n",elapsed.count(),T[i]/elapsed.count()*(i<=4?0.001:1));
+    }
     // for(int i = 0;i<=n+s-2;++i){
     //     for(int j = 0;j<=m+t-2;++j){
     //         cout<<c[i][j].Re<<" ";

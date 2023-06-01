@@ -155,7 +155,7 @@ void FFT(Complex* A,int type)
 void init()
 {
     //n = 10,m = 10,s = 10,t = 10;
-    n = 2000,m = 2000,s = 2000,t = 2000;
+    //n = 2000,m = 2000,s = 2000,t = 2000;
     if(pro_id == 0){
         //cin>>n>>m>>s>>t;
         for(int i=0;i<n;++i){
@@ -176,25 +176,29 @@ void FFT_2D_row(Complex *T,int type,int typecl)
 {
     int blocks = limit/pro_size;
     if(typecl == 0 && pro_id == 0){
+        #pragma omp for
         for(int i=0;i<limit;++i){
             for(int j=0;j<limit;++j){
                 Cal[i*limit+j] = T[i*limit+j];
             }
         }
     }
-    MPI_Scatter((double*)Cal,limit*blocks,MPI_DOUBLE,(double*)Cal_rev,limit*blocks,MPI_DOUBLE,0,MPI_COMM_WORLD);
-
-    #pragma omp parallel num_threads(thread_count)
+    #pragma omp single
     {
-        #pragma omp for
-        for(int i=0;i<blocks;++i){
-            FFT(Cal_rev+i*limit,type);
-        }
+    MPI_Scatter((double*)Cal,limit*blocks,MPI_DOUBLE,(double*)Cal_rev,limit*blocks,MPI_DOUBLE,0,MPI_COMM_WORLD);
     }
+    
+    #pragma omp for
+    for(int i=0;i<blocks;++i){
+            FFT(Cal_rev+i*limit,type);
+    }
+    #pragma omp single
+    {
     MPI_Barrier(MPI_COMM_WORLD);
-
     MPI_Gather(Cal_rev,limit*blocks,MPI_DOUBLE,Cal,limit*blocks,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    }
     if(typecl == 0 && pro_id == 0){
+        #pragma omp for
         for(int i=0;i<limit;++i){
             for(int j=0;j<limit;++j){
                 T[i*limit+j] = Cal[i*limit+j];  
@@ -206,6 +210,7 @@ void FFT_2D_row(Complex *T,int type,int typecl)
 void FFT_2D_col(Complex *T,int type)
 {
     if(pro_id == 0){
+        #pragma omp for
         for(int i=0;i<limit;++i){
             for(int j=0;j<limit;++j){
                 Cal[i*limit+j] = T[j*limit+i];
@@ -214,6 +219,7 @@ void FFT_2D_col(Complex *T,int type)
     }
     FFT_2D_row(T,type,1);
     if(pro_id == 0){
+        #pragma omp for
         for(int i=0;i<limit;++i){
             for(int j=0;j<limit;++j){
                 T[i*limit+j] = Cal[j*limit+i];
@@ -225,11 +231,17 @@ void FFT_2D_col(Complex *T,int type)
 void FFT_2D(Complex *T,int type)
 {
     FFT_2D_row(T,type,0);
+    #pragma omp single
+    {
     MPI_Barrier(MPI_COMM_WORLD);
+    }
 
     FFT_2D_col(T,type);
-    MPI_Barrier(MPI_COMM_WORLD);
 
+    #pragma omp single
+    {
+    MPI_Barrier(MPI_COMM_WORLD);
+    }
 }
 void CONV_2D()
 {
@@ -240,23 +252,28 @@ void CONV_2D()
         r[i]=(r[i>>1]>>1)|((i&1)<<(l-1));
     }
     init_root(limit);
-    for(int i=0;i<limit;++i){
-        for(int j=0;j<limit;++j){
-            Ta[i*limit+j] = a[i][j];
-            Tb[i*limit+j] = b[i][j];
-        }
-    }
-
-    FFT_2D(Ta,1);
-    FFT_2D(Tb,1);
-    if(pro_id == 0){
-        for(int i = 0;i<limit;++i){
-            for(int j = 0;j<limit;++j){
-                c[i*limit+j] = Ta[i*limit+j]*Tb[i*limit+j];
+    #pragma omp parallel num_threads(thread_count)
+    {
+        #pragma omp for
+        for(int i=0;i<limit;++i){
+            for(int j=0;j<limit;++j){
+                Ta[i*limit+j] = a[i][j];
+                Tb[i*limit+j] = b[i][j];
             }
         }
+
+        FFT_2D(Ta,1);
+        FFT_2D(Tb,1);
+        if(pro_id == 0){
+            #pragma omp for
+            for(int i = 0;i<limit;++i){
+                for(int j = 0;j<limit;++j){
+                    c[i*limit+j] = Ta[i*limit+j]*Tb[i*limit+j];
+                }
+            }
+        }
+        FFT_2D(c,-1);
     }
-    FFT_2D(c,-1);
 }
 int main()
 {
@@ -266,11 +283,19 @@ int main()
     MPI_Comm_rank(MPI_COMM_WORLD,&pro_id);
     MPI_Comm_size(MPI_COMM_WORLD,&pro_size);
 
-    init();
-    double start = MPI_Wtime();
-    CONV_2D();
-    double end = MPI_Wtime();
-    if(pro_id==0){cout<<fixed<<setprecision(6)<<end-start<<"\n";}
+    // double T[20]={0.56,1.1,3.5,13,49,0.27,1.38,5.72};
+    // int thr[20]={14,30,62,126,254,510,1022,2046};
+    int thr[20]={1,2,4,8,16,32};
+    for(int i=0;i<6;++i){
+        n = m = s = t = 2000;
+        thread_count = thr[i];
+        init();
+        double start = MPI_Wtime();
+        CONV_2D();
+        double end = MPI_Wtime();
+        if(pro_id==0){cout<<fixed<<setprecision(2)<<end-start<<"s/"<<5.72/(end-start)<<" & ";}
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
 
     // if(pro_id == 0){
     //     for(int i = 0;i<=n+s-2;++i){
