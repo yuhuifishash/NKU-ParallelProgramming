@@ -100,7 +100,7 @@ void FFT_2D_row(Complex* A,int type)
 }
 void FFT_2D_col(Complex* A,int type)
 {
-    Complex* Trans = new Complex[MAXN];
+    Complex* Trans = new Complex[limit*limit+limit];
     for(int i=0;i<limit;++i){
         for(int j=0;j<limit;++j){
             Trans[i*limit+j] = A[j*limit+i];
